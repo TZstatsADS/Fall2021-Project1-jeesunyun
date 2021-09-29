@@ -1,6 +1,8 @@
 ---
-title: "Project 1: Data Story on the History of Philisophy"
-output: html_notebook
+title: 'Project 1: Data Story on the History of Philisophy'
+output:
+  html_document:
+    df_print: paged
 ---
 
 
@@ -413,5 +415,6 @@ create_wc(kant_txt1); create_wc(kant_txt2); create_wc(kant_txt3)
 ### Findings
 We see both changes and nonchanges.
 
-
-1. For Nietzsche, for all three years the most used word is all similarly "one", and "will".
+1. For Nietzsche, for all three years the most used word is all similarly "one", and "will". However, we can see a shift in subject. Inthe early publication, he focuses more on man, morality, good, etc. However the last world cloud shows more of god, world, whole, people, and etc.
+2. For Hagel, he started out with words such as sprit, purem universal. Later, he has shifted to more od determinatoin, right, self, and consciousness rather than spiritual.
+3. For Kant, he constantly uses the words reason , law, judgment, empirical, etc. From his choice of words, we can see that his subjects are distinct from the previous 2 philosophers.
