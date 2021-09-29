@@ -1,0 +1,417 @@
+---
+title: "Project 1: Data Story on the History of Philisophy"
+output: html_notebook
+---
+
+
+
+## Step 0: Load packages and libraries
+
+```{r, warning=FALSE}
+# check and install needed packages
+packages.used = c('tidytext', 'tidyverse', 'DT','wordcloud', 'wordcloud2',
+                'htmlwidgets', 'plotly', 'RColorBrewer', 'sentimentr', 'stringr', 'tm')
+
+packages.needed = setdiff(packages.used,
+                          intersect(installed.packages()[,1],
+                                    packages.used))
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+# load packages
+library(stringr)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(htmlwidgets)
+library(plotly)
+library(RColorBrewer)
+library(sentimentr)
+library(wordcloud)
+library(wordcloud2)
+library(tm)
+source('../lib/functions.R')
+```
+
+This notebook was prepared with the following environmental settings:
+```{r}
+print(R.version)
+```
+
+
+## Step1: Read in the data from [Kaggle: History of Philosophy](https://www.kaggle.com/kouroshalizadeh/history-of-philosophy)
+
+```{r, message=FALSE}
+# read csv
+data <- read_csv("../data/philosophy_data.csv")
+
+head(data)
+```
+This is how the data looks like.
+Each row represents a sentence in the title; thus the number of rows represent the number of sentences written.
+
+
+## Step2: Data Preprocessing
+
+Sentences are already tokenized and the sentence length is already computed in the given data.
+However, we do need to count the number of tokens in each sentence and add column `n_tokens`.
+The `length` function does not work here because the column is a character string, not a list.
+
+```{r}
+# add number of tokens
+new_data <- data %>%
+  mutate(n_tokens = f.word_count(data$tokenized_txt))
+```
+
+```{r}
+# into a format that can be used to plot
+tidy_df <- data %>% 
+  dplyr::select(school, author, title) %>% 
+  group_by(school, author) %>% 
+  summarize(n_title = n_distinct(title),
+            n_sent = n()) %>% 
+  pivot_longer(cols = c("n_title", "n_sent"),
+               names_to = "type",
+               values_to = "count")
+
+```
+
+## Step3: Exploratory Data Analysis
+### Number of Sentences
+
+Before doing a text analysis, we want to know some information on the data. Here are some of the basic questions regarding:
+
+
+**I. Number of Titles and Sentences**
+
+Some people like writing lengthy writings, some like it succinct. Is there a preferene or tendency in the length of works depending on schools or titles?
+
+
+1. How many titles are there per school? Which school was the most active in publishing manuscripts?
+
+  How many titles and sentences per author? Which author has the most manuscripts?
+  
+```{r, message=FALSE, warning= FALSE}
+# data frame that shows school, author, title and the nu,ber of sentences in each title
+title.per.school <- data %>% 
+  dplyr::select(school, author,title) %>% 
+  group_by(school, author, title)%>% 
+  summarise(n_sent = n())
+
+title.per.author <- data %>% 
+  dplyr::select(author, title) %>% 
+  group_by(author, title) %>% 
+  summarise(n_sent = n())
+
+datatable(title.per.school, options = list(pageLength=5))
+datatable(title.per.author, options = list(pageLength=5))
+
+
+# assign each school with a different color with consistency
+title.per.school$school <- factor(title.per.school$school, levels = c(unique(title.per.school$school)))
+schools <- c(levels(title.per.school$school))
+getPalette <- colorRampPalette(brewer.pal(12, 'Set3'))
+colors <- getPalette(13)
+names(colors)<- schools
+
+# plot for number of titles per philosophical school  
+g1 <- ggplot(title.per.school)+
+  geom_bar(aes(x= fct_infreq(school), fill=school))+
+  scale_color_manual(values= colors)+
+  labs(title = 'Number of titles per philosophical school',
+       x= 'School',
+       y= 'Titles (count)')+
+  theme(legend.position = "none")+
+  coord_flip()
+
+g1
+
+```
+
+
+2. Distribution of number of sentences:
+```{r}
+g2 <- tidy_df %>% filter(type== "n_sent") %>% 
+  ggplot(aes(log10(count)))+
+  geom_histogram(binwidth = .1, color= "black")+
+  geom_density()+
+  labs(title = "Number of sentences for each title",
+       x= "log10(number of sentences)",
+       y="Frequency")
+
+g2
+```
+
+Doesn't follow a known probability distribution. The global maximum(mode) is at around 10e4.1.
+
+
+3. How many sentences are there per school? 
+
+```{r}
+g3 <- data %>%
+  dplyr::select(school) %>% 
+ggplot()+
+  geom_histogram(aes(fct_infreq(school), fill = school), stat="count")+
+  scale_color_manual(values= colors)+
+  labs(title= "Number of sentences per philosophical school",
+       x= "School",
+       y= "Sentences (count)")+
+  coord_flip()+
+  theme(legend.position = "none")
+
+
+g3
+
+```
+
+
+3. Is there a correlation between the number of titles per school?
+
+In other words, does more titles mean more sentences?
+
+```{r}
+par(mfrow=c(2,1))
+g1; g3
+
+```
+
+Through this side by side comparison, we see that the order is different when ordered according to title or number of sentences.
+Thus it can be inferred that more titles doesn't necessarily mean more sentences.
+For better visualization/easy comparison:
+
+**Cleveland Dot Plot**
+```{r}
+
+g4 <- tidy_df %>% 
+  group_by(school, type) %>% 
+  summarise(count= sum(count)) %>% 
+  ggplot(aes(log10(count), fct_reorder2(school, type=="n_sent", log10(count), .desc = FALSE), color=type))+
+  geom_point()+
+  labs(title= "Comparison of number of titles and sentences per school",
+       x= "log10(count)",
+       y= "School")+
+  scale_color_manual(name="Type",
+                       labels=c("# of sentences","# of titles"),
+                       values=c("red","blue"))
+  
+
+g4
+```
+This better shows that the more number of sentences does not automatically mean more titles.
+So, the works are not all of similar length, but some are shorter than others and some are longer than others.
+
+
+5. Number of sentences per title
+
+
+```{r, fig.height=7, fig.width=8}
+g5 <- data %>% 
+  dplyr::select(school, author, title) %>% 
+  ggplot()+
+  geom_bar(aes(fct_infreq(title), fill=school))+
+  scale_x_discrete(label = function(x) abbreviate(x, minlength = 7))+
+  theme(axis.text.x = element_text(angle=45, hjust = 1, vjust=0.5))+
+  labs(title = "Number of sentences per title",
+       x= "Title (abbreviated)",
+       y= "Number of sentences")
+
+
+ggplotly(g5)
+```
+
+If you hover over the graph you can isolate each school in the graph, like faceting. We can see that the length of the title doesn't depend on each school.
+For example, schools that have multiple titles such as `Analytic` and `german_idealism`, there isn't a distinct pattern in the length of titles by school.
+
+
+6. How about by author?
+
+Since some authors have one title, for simplicity lets filter for authors with multiple works.
+```{r, fig.height=7, fig.width=8}
+mult.authors <- tidy_df %>% 
+  filter(type == "n_title") %>% 
+  filter(count > 1) %>%  
+  ungroup() %>% 
+  dplyr::select(author) %>% unlist()
+
+g6 <- data %>% 
+  dplyr::select(school, author, title) %>% 
+  filter(author %in% mult.authors) %>% 
+  ggplot()+
+  geom_bar(aes(fct_infreq(title), fill=author))+
+  scale_x_discrete(label = function(x) abbreviate(x, minlength = 7))+
+  theme(axis.text.x = element_text(angle=45, hjust = 1, vjust=0.5))+
+  geom_hline(yintercept = mean(title.per.author$n_sent), size=1, col='gray')
+ 
+
+ggplotly(g6)
+```
+
+Again, hovering over the above plot, we can see that except for some authors, there is no clear pattern as to one would write short or long works.
+The horizontal line represents the mean of the number of sentences for all authors. By isolating the data for Descartes, we can see that both his work in the data shows very low number of sentences, whereas Heidegger's works tend to be above average. Also, notice that Marx's work is on both ends of the graph.
+
+
+
+**II. Sentence Length**
+
+1. Length of sentences and tokens by schools, authors, titles
+
+**Total sentence length per title**
+```{r, warning=FALSE}
+sent.len.df <- new_data %>% 
+  dplyr::select(school, author, title, sentence_length, n_tokens) %>% 
+  group_by(school, author, title) %>% 
+  summarize(sent_len = sum(sentence_length), n_tokens = sum(n_tokens))
+
+datatable(sent.len.df, options = list(pageLength=5))
+```
+
+**Average sentence length per title**
+```{r}
+len.avg.df <- new_data %>% 
+  dplyr::select(school, author, title, sentence_length, n_tokens) %>% 
+  group_by(school, author, title) %>% 
+  summarize(sent_len = mean(sentence_length), n_tokens = mean(n_tokens))
+# number of words in a sentence
+
+datatable(len.avg.df, options = list(pageLength=5))
+```
+
+2. Sentence length distribution
+```{r, warning=FALSE}
+length_info <-summary(data$sentence_length)
+length_info
+
+g.len <- new_data %>%
+  dplyr::select(sentence_length) %>% 
+  ggplot(aes(log10(sentence_length)))+
+  geom_histogram(bins = 50, color="black")+
+  labs(title= "Sentence length distribution",
+       x= "log10(Sentence length)",
+       y= "Frequency")
+
+token_info <- summary(new_data$n_tokens)
+token_info
+
+g.token <- new_data %>%
+  dplyr::select(n_tokens) %>% 
+  ggplot(aes(log10(n_tokens)))+
+  geom_histogram(bins = 50, color= "black")+
+  labs(title= "Number of tokens distribution",
+       x= "log10(Number of tokens)",
+       y= "Frequency")
+
+par(mfrow= c(1, 2))
+g.len ; g.token
+```
+
+For which sentence has 0 tokens?
+```{r}
+id <- which(new_data$n_tokens == 0)
+new_data[id,c("sentence_str", "tokenized_txt")]
+
+
+#filter out for rows that holds sentences without meaning
+new_data <- new_data %>% 
+  filter(n_tokens >0)
+
+summary(new_data$n_tokens)
+```
+
+
+
+2. Is there a correlation between number of sentences and number of words in a sentence by title?
+For example, did writings consist of many short sentences or few lengthy sentences?
+
+```{r}
+corr_df <- title.per.school %>% 
+  left_join(sent.len.df, by = c("school", "author", "title")) %>% 
+  ungroup() %>% 
+  dplyr::select(title, n_sent, n_tokens)
+
+g.cor <- ggplot(corr_df)+
+  geom_point(aes(log10(n_sent), log10(n_tokens)))
+
+g.cor
+```
+
+The scatter plot seems to show some correlation between the 2 variables.
+
+Statistically,
+```{r}
+shapiro.test(corr_df$n_sent)
+shapiro.test(corr_df$n_tokens)
+```
+
+We cannot compute the Pearson correlation between these 2 variables since it does not pass the Shapiro-Wilk test of normality.
+Instead, we compute the Kendall correlation that computes correlation by the "rank".
+```{r}
+result <- cor.test(corr_df$n_sent, corr_df$n_tokens, method = "kendall")
+result
+```
+
+Although we cannot conclusively say that the longer the sentences, the longer the work as that would be too much of a stretch, we still can say that the works are not consisted of excessively much short sentences or less lengthy sentences.
+
+
+
+
+## Word Cloud
+
+Many analysis has been done on how many distinct words were used by authors, or what words were mostly used by them.
+Instead, I tried to look at authors who had more than one title in this data to see if their use of words has changed over time.
+Let's take a few authors from the list: Nietzsche, Hegel, and Kant
+```{r,warning= FALSE}
+mult.authors
+
+mlt_pub <- data %>%
+  dplyr::select(author, title, original_publication_date, tokenized_txt) %>% 
+  filter(author %in% mult.authors)
+
+# create dataframe for each author
+niet <- mlt_pub %>% filter(author == "Nietzsche")
+hegel <- mlt_pub %>% filter(author == "Hegel")
+kant <- mlt_pub %>% filter(author == "Kant")
+```
+```{r warning=FALSE}
+niet %>% select(title, original_publication_date) %>% 
+  distinct(title, .keep_all=TRUE) %>% arrange(original_publication_date)
+  
+niet_txt1 <- niet %>% filter(original_publication_date==1886)
+niet_txt2 <- niet %>% filter(original_publication_date==1887)
+niet_txt3 <- niet %>% filter(original_publication_date==1888)
+
+par(mfrow= c(1, 3))
+create_wc(niet_txt1); create_wc(niet_txt2); create_wc(niet_txt3)
+```
+
+```{r warning=FALSE}
+hegel %>% select(title, original_publication_date) %>% 
+  distinct(title, .keep_all=TRUE) %>% arrange(original_publication_date)
+  
+hegel_txt1 <- hegel %>% filter(original_publication_date==1807)
+hegel_txt2 <- hegel %>% filter(original_publication_date==1817)
+hegel_txt3 <- hegel %>% filter(original_publication_date==1820)
+
+par(mfrow= c(1, 3))
+create_wc(hegel_txt1); create_wc(hegel_txt2); create_wc(hegel_txt3)
+
+```
+
+```{r warning=FALSE}
+kant %>% select(title, original_publication_date) %>% 
+  distinct(title, .keep_all=TRUE) %>% arrange(original_publication_date)
+  
+kant_txt1 <- kant %>% filter(original_publication_date==1781)
+kant_txt2 <- kant %>% filter(original_publication_date==1788)
+kant_txt3 <- kant %>% filter(original_publication_date==1790)
+
+par(mfrow= c(1, 3))
+create_wc(kant_txt1); create_wc(kant_txt2); create_wc(kant_txt3)
+```
+
+
+### Findings
+We see both changes and nonchanges.
+
+
+1. For Nietzsche, for all three years the most used word is all similarly "one", and "will".
